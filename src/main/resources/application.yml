@@ -1,0 +1,52 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: chat-api
+
+  web:
+    resources:
+      static-locations: classpath:/static/,classpath:/public/
+
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017,localhost:27018/?replicaSet=rs0
+      database: chatdb
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    repositories:
+      enabled: false
+
+  r2dbc:
+    url: r2dbc:mysql://localhost:3306/webflux?useUnicode=true&characterEncoding=utf-8&serverZoneId=UTC
+    username: java
+    password: java
+
+  thymeleaf:
+    prefix: classpath:/templates/
+    suffix: .html
+    mode: HTML
+    cache: false
+    encoding: UTF-8
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+
+jwt:
+  secret: iOaMqTcUVTa0UuNTy4XfYrE9YJuWTUPg0QAWyZazn5iPdlP8GObBRAg4YgaLk2gHQ7DRf71AYj8bml0yhnZXwE9YJuWTUPg0QAWyZazn5iPdlP8GObNTy4XfYrE9YJuWTUPg0QAWyZa
+  access-token-expiration: 1800000   # 30분
+  refresh-token-expiration: 604800000 # 7일
