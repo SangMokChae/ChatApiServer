@@ -52,6 +52,7 @@ public class ChatSinkManager {
 	 */
 	public void emitToRoom(String roomId, ChatMessage message) {
 		Sinks.Many<ChatMessage> sink = roomSinkMap.get(roomId);
+		log.info("sink size :: {}", sink);
 		if (sink != null) sink.tryEmitNext(message);
 	}
 	

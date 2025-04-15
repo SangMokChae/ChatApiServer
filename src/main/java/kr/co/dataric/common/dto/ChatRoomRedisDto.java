@@ -15,16 +15,25 @@ import java.util.List;
 @AllArgsConstructor
 public class ChatRoomRedisDto {
 	private String roomId;
+	private String roomName;
 	private String lastMessage;
 	private LocalDateTime lastMessageTime;
-	private List<String> userIds;  // 참여 유저 ID 목록
+	private List<String> userIds;
+	private String lastSender;
+	private int readCount;
 	
+	// MongoDB에서 fallback할 때 사용
 	public static ChatRoomRedisDto from(ChatRoom chatRoom) {
 		return ChatRoomRedisDto.builder()
 			.roomId(chatRoom.getRoomId())
+			.roomName(chatRoom.getRoomName())
 			.lastMessage(chatRoom.getLastMessage())
 			.lastMessageTime(chatRoom.getLastMessageTime())
 			.build();
+	}
+	
+	public String getRedisKey() {
+		return "chat_room:" + this.roomId + ":" + lastSender + ":" + readCount;
 	}
 	
 }

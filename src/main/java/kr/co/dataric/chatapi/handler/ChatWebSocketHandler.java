@@ -21,10 +21,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 @Slf4j
 @Component
@@ -65,34 +62,55 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 			.flatMap(payload -> {
 				try {
 					JsonNode json = objectMapper.readTree(payload);
-					LocalDateTime chatDate = LocalDateTime.now();
+					String type = json.get("type").asText();
 					
-					ChatMessage msg = objectMapper.treeToValue(json, ChatMessage.class);
-					msg.setMsgId(String.valueOf(UUID.randomUUID()));
-					msg.setSender(userId);
-					msg.setRoomId(roomId);
-					msg.setTimestamp(chatDate);
-					chatService.saveChatMessage(msg).subscribe();
-					
-					List<String> userIdsList = List.of(json.get("inUserIds").asText().split(","));
-					
-					// Kafka로 읽음 처리 이벤트 전송
-					kafkaChatProducer.sendReadReceipt(msg.getMsgId(), userId, roomId);
-					
-					// 새로운 채팅방 생성 (주로 1:1 room) --> 새로 방만들거나, 단체방을 생성했을 경우 FrontEnd 단에서 false로 전송을 해줘야 한다.
-					if(json.get("isNewRoomMsg").asText().equals("true")) {
-						customChatRoomRepository.createNewChatRoom(roomId, userIdsList).subscribe();
+					// 메시지 전송 처리
+					if ("chat".equals(type)) {
+						String message = Optional.ofNullable(json.get("message")).map(JsonNode::asText).orElse(null);
+						if (message == null || message.isBlank()) {
+							log.warn("❌ 필수 필드 'message' 누락 또는 빈 값. payload: {}", payload);
+							return Mono.empty();
+						}
+						
+						String msgId = Optional.ofNullable(json.get("msgId")).map(JsonNode::asText).orElse(UUID.randomUUID().toString());
+						LocalDateTime chatDate = LocalDateTime.now();
+						
+						ChatMessage msg = objectMapper.treeToValue(json, ChatMessage.class);
+						msg.setMsgId(msgId);
+						msg.setSender(userId);
+						msg.setRoomId(roomId);
+						msg.setMessage(message);
+						msg.setTimestamp(chatDate);
+						
+						// inUserIds 파싱
+						List<String> userIdsList = new ArrayList<>();
+						JsonNode userIdArrayNode = json.get("inUserIds");
+						if (userIdArrayNode != null && userIdArrayNode.isArray()) {
+							for (JsonNode node : userIdArrayNode) {
+								userIdsList.add(node.asText());
+							}
+						}
+						
+						// 새 방이면 생성
+						if ("true".equals(Optional.ofNullable(json.get("isNewRoomMsg")).map(JsonNode::asText).orElse("false"))) {
+							customChatRoomRepository.createNewChatRoom(roomId, userIdsList).subscribe();
+						}
+						
+						// 저장 및 전파
+						chatService.saveChatMessage(msg).subscribe();
+						customChatRoomRepository.updateLastMessage(roomId, msg.getMessage(), chatDate).subscribe();
+						kafkaChatProducer.sendMessage(msg);
+						
+					} else if ("read".equals(type)) {
+						// 읽음 처리
+						String msgId = json.get("msgId").asText();
+						kafkaChatProducer.sendReadReceipt(msgId, userId, roomId);
 					}
 					
-					kafkaChatProducer.sendMessage(msg);
-					
-					// mongodb에 채팅방 마지막 값 저장
-					customChatRoomRepository.updateLastMessage(roomId, msg.getMessage(), chatDate).subscribe();
-					
-					chatSinkManager.emitToRoom(roomId, msg);
 					return Mono.empty();
+					
 				} catch (Exception e) {
-					log.error("WebSocket 수신 메시지 파싱 실패", e);
+					log.error("❌ WebSocket 수신 메시지 파싱 실패 - payload: {}", payload, e);
 					return Mono.empty();
 				}
 			})

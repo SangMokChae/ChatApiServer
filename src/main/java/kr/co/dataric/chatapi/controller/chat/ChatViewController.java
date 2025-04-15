@@ -32,6 +32,7 @@ public class ChatViewController {
 		
 		return Mono.just(Rendering.view("chat/chatView")
 			.modelAttribute("roomId", viewRequestDto.getRoomId())
+			.modelAttribute("userId", userId)
 			.modelAttribute("inUserIds", viewRequestDto.getInUserIds())
 			.build());
 	}

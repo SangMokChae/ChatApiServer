@@ -55,6 +55,7 @@
 
 <script th:inline="javascript">
 	const roomId = [[${roomId}]];
+	const userId = [[${userId}]];
 	const inUserIds = [[${inUserIds}]];
 	let socket;
 	let offset = 0;
@@ -62,6 +63,7 @@
 	const chatBox = document.getElementById("chat-box");
 	const scrollBtn = document.getElementById("scroll-down-btn");
 	const shownMessageIds = new Set();
+	const pendingReadMessages = new Set();
 
 	function connectWebSocket() {
 		const wsUrl = `ws://${location.host}/ws/chat/${roomId}`;
@@ -75,16 +77,21 @@
 		
 			if (!shownMessageIds.has(msgId)) {
 				shownMessageIds.add(msgId);
+		
+				// 📌 내가 보낸 메시지가 아니면 읽음 후보로 등록
+				if (msg.sender !== userId) {
+					pendingReadMessages.add(msgId);
+				}
+		
 				const timeFormat = msg.timestamp.replace("T", " ").split(".")[0].slice(0, -3);
-		
-				// ✅ readCount가 포함된 메시지
 				const readCount = msg.readCount ?? 0;
+				const readIndicator = readCount > 0 ? ` 📖(${readCount})` : "";
+				const content = `[${timeFormat}] ${msg.sender}: ${msg.message}${readIndicator}`;
 		
-				const content = `[${timeFormat}] ${msg.sender}: ${msg.message}  📖(${readCount})`;
 				appendMessage(content, false);
 			}
 		
-			// 오래된 정보 삭제
+			// 오래된 메시지 관리
 			if (shownMessageIds.size > 200) {
 				const oldest = shownMessageIds.values().next().value;
 				shownMessageIds.delete(oldest);
@@ -99,18 +106,27 @@
 		const input = document.getElementById("message");
 		const message = input.value.trim();
 		if (!message || socket.readyState !== WebSocket.OPEN) return;
-		
-		// 새로운 값인지 확인
-		let isNewRoomCheck = shownMessageIds.size == 0 ? 'true' : 'false';
-
+	
+		let isNewRoomCheck = shownMessageIds.size === 0 ? 'true' : 'false';
+	
+		// inUserIds가 문자열일 경우 → 안전하게 배열로 변환
+		let parsedUserIds = Array.isArray(inUserIds)
+			? inUserIds
+			: typeof inUserIds === 'string'
+				? inUserIds.replaceAll('[', '').replaceAll(']', '').split(',').map(s => s.trim()).filter(Boolean)
+				: [];
+	
+		const totalReceivers = Math.max(0, parsedUserIds.length - 1);
+	
 		const payload = {
 			type: "chat",
 			roomId: roomId,
 			message: message,
 			isNewRoomMsg: isNewRoomCheck,
-			inUserIds: inUserIds
-			totalReceivers: (inUserIds.size - 1)
+			inUserIds: parsedUserIds,
+			totalReceivers: totalReceivers
 		};
+	
 		socket.send(JSON.stringify(payload));
 		input.value = "";
 	}
@@ -166,6 +182,26 @@
 	}
 
 	window.addEventListener("DOMContentLoaded", connectWebSocket);
+	
+	window.addEventListener("focus", () => {
+		pendingReadMessages.forEach(msgId => {
+			sendReadReceipt(msgId);
+		});
+		pendingReadMessages.clear();
+	});
+	
+	function sendReadReceipt(msgId) {
+		if (socket.readyState !== WebSocket.OPEN) return;
+	
+		const payload = {
+			type: "read",
+			roomId: roomId,
+			msgId: msgId,
+			userId: userId
+		};
+	
+		socket.send(JSON.stringify(payload));
+	}
 </script>
 </body>
 </html>
