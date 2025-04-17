@@ -1,5 +1,6 @@
 package kr.co.dataric.common.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -15,6 +16,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @Builder
 @Document(collection = "chat_messages")
+@JsonIgnoreProperties(ignoreUnknown = true) // for newMessage Check -> createRoom
 public class ChatMessage {
 	
 	@Id
@@ -30,8 +32,5 @@ public class ChatMessage {
 	// ✅ 메시지 타입 기본값 설정 (text, img, video, link 등)
 	@Builder.Default
 	private String chatType = "text";
-	
-	@Transient
-	private int totalReceivers;
 }
 

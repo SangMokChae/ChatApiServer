@@ -27,29 +27,15 @@
 <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 flex flex-col gap-4 mt-8">
 	<h2 class="text-2xl font-semibold text-gray-800 text-center">💬 채팅방</h2>
 	
-	<!-- 채팅 메시지 출력 -->
-	<div id="chat-box" class="flex-1 h-96 overflow-y-auto bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-2 text-sm text-gray-700"
-			 style="max-height: 70vh; overflow-y: auto;">
-		<!-- 메시지 출력 -->
-		
-		<!-- 스크롤 다운 버튼 (chat-box 내부 중앙 하단) -->
-		<button id="scroll-down-btn" onclick="scrollToBottom()"
-						class="fixed bottom-24 left-1/2 -translate-x-1/2 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-full shadow-lg opacity-80 transition-opacity duration-300 hidden z-50" style="transform: translate(-24px, -50px);">
-			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="30" height="30">
-				<path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm-.53 14.03a.75.75 0 0 0 1.06 0l3-3a.75.75 0 1 0-1.06-1.06l-1.72 1.72V8.25a.75.75 0 0 0-1.5 0v5.69l-1.72-1.72a.75.75 0 0 0-1.06 1.06l3 3Z" clip-rule="evenodd" />
-			</svg>
-		</button>
-	</div>
+	<div id="chat-box" class="flex-1 h-96 overflow-y-auto bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-2 text-sm text-gray-700" style="max-height: 70vh; overflow-y: auto;"></div>
 	
-	<!-- 입력창 -->
+	<button id="scroll-down-btn" onclick="scrollToBottom()" class="fixed bottom-24 left-1/2 -translate-x-1/2 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-full shadow-lg opacity-80 transition-opacity duration-300 hidden z-50" style="transform: translate(-24px, -50px);">
+		⬇
+	</button>
+	
 	<div class="flex gap-2">
-		<input id="message" type="text"
-					 class="flex-1 p-3 rounded-xl border border-gray-300 focus:outline-none focus:ring focus:ring-blue-200"
-					 placeholder="메시지를 입력하세요" onkeydown="enterKey()" />
-		<button onclick="sendMessage()"
-						class="bg-blue-500 text-white px-5 py-2 rounded-xl hover:bg-blue-600 transition-all">
-			전송
-		</button>
+		<input id="message" type="text" class="flex-1 p-3 rounded-xl border border-gray-300 focus:outline-none focus:ring focus:ring-blue-200" placeholder="메시지를 입력하세요" onkeydown="enterKey()" />
+		<button onclick="sendMessage()" class="bg-blue-500 text-white px-5 py-2 rounded-xl hover:bg-blue-600 transition-all">전송</button>
 	</div>
 </div>
 
@@ -57,80 +43,70 @@
 	const roomId = [[${roomId}]];
 	const userId = [[${userId}]];
 	const inUserIds = [[${inUserIds}]];
-	let socket;
+	let chatSocket;
 	let offset = 0;
 	let isLoading = false;
 	const chatBox = document.getElementById("chat-box");
 	const scrollBtn = document.getElementById("scroll-down-btn");
 	const shownMessageIds = new Set();
 	const pendingReadMessages = new Set();
-
+	
 	function connectWebSocket() {
-		const wsUrl = `ws://${location.host}/ws/chat/${roomId}`;
-		socket = new WebSocket(wsUrl);
-
-		socket.onopen = () => console.log("✅ WebSocket 연결됨");
-
-		socket.onmessage = (event) => {
+		// chatSocket
+		chatSocket = new WebSocket(`ws://${location.host}/ws/chat/${roomId}`);
+	
+		chatSocket.onopen = () => console.log("✅ WebSocket 연결됨");
+	
+		chatSocket.onmessage = (event) => {
 			const msg = JSON.parse(event.data);
 			const msgId = `${msg.msgId}`;
-		
 			if (!shownMessageIds.has(msgId)) {
 				shownMessageIds.add(msgId);
-		
-				// 📌 내가 보낸 메시지가 아니면 읽음 후보로 등록
-				if (msg.sender !== userId) {
-					pendingReadMessages.add(msgId);
-				}
-		
+				if (msg.sender !== userId) pendingReadMessages.add(msgId);
 				const timeFormat = msg.timestamp.replace("T", " ").split(".")[0].slice(0, -3);
 				const readCount = msg.readCount ?? 0;
 				const readIndicator = readCount > 0 ? ` 📖(${readCount})` : "";
 				const content = `[${timeFormat}] ${msg.sender}: ${msg.message}${readIndicator}`;
-		
 				appendMessage(content, false);
 			}
-		
-			// 오래된 메시지 관리
-			if (shownMessageIds.size > 200) {
-				const oldest = shownMessageIds.values().next().value;
-				shownMessageIds.delete(oldest);
-			}
+			if (shownMessageIds.size > 200) shownMessageIds.delete(shownMessageIds.values().next().value);
 		};
-
-		socket.onclose = () => console.warn("🔁 WebSocket 종료됨. 자동 재연결은 하지 않습니다.");
-		socket.onerror = (err) => console.error("❌ WebSocket 에러:", err);
+	
+		chatSocket.onclose = () => console.warn("🔁 WebSocket 종료됨. 자동 재연결은 하지 않습니다.");
+		chatSocket.onerror = (err) => console.error("❌ WebSocket 에러:", err);
+		
+		// readSocket
+		const readSocket = new WebSocket(`ws://${location.host}/ws/read/${roomId}`);
+		
+		// notifySocket
+		const notifySocket = new WebSocket(`ws://${location.host}/ws/notify/${userId}`);
+		
+		// statusSocket
+		const statusSocket = new WebSocket(`ws://${location.host}/ws/status/${userId}`);
 	}
-
+	
 	function sendMessage() {
 		const input = document.getElementById("message");
 		const message = input.value.trim();
-		if (!message || socket.readyState !== WebSocket.OPEN) return;
-	
+		if (!message || chatSocket.readyState !== WebSocket.OPEN) return;
 		let isNewRoomCheck = shownMessageIds.size === 0 ? 'true' : 'false';
-	
-		// inUserIds가 문자열일 경우 → 안전하게 배열로 변환
 		let parsedUserIds = Array.isArray(inUserIds)
 			? inUserIds
 			: typeof inUserIds === 'string'
 				? inUserIds.replaceAll('[', '').replaceAll(']', '').split(',').map(s => s.trim()).filter(Boolean)
 				: [];
-	
 		const totalReceivers = Math.max(0, parsedUserIds.length - 1);
-	
 		const payload = {
-			type: "chat",
 			roomId: roomId,
 			message: message,
 			isNewRoomMsg: isNewRoomCheck,
 			inUserIds: parsedUserIds,
 			totalReceivers: totalReceivers
 		};
-	
-		socket.send(JSON.stringify(payload));
+		chatSocket.send(JSON.stringify(payload));
 		input.value = "";
 	}
-
+	
 	function appendMessage(msg, prepend = false) {
 		const div = document.createElement("div");
 		div.textContent = msg;
@@ -141,14 +117,14 @@
 			chatBox.scrollTop = chatBox.scrollHeight;
 		}
 	}
-
+	
 	function enterKey() {
 		if (window.event.keyCode === 13) {
 			const input = document.getElementById("message");
 			if (input.value.trim()) sendMessage();
 		}
 	}
-
+	
 	chatBox.addEventListener("scroll", () => {
 		if (!isLoading && chatBox.scrollTop <= chatBox.scrollHeight * 0.3) {
 			isLoading = true;
@@ -168,39 +144,41 @@
 					isLoading = false;
 				});
 		}
-		
-		// 버튼 보이기/숨기기 로직
-		if (chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 20) {
-			scrollBtn.classList.add("hidden");
-		} else {
-			scrollBtn.classList.remove("hidden");
-		}
+		scrollBtn.classList.toggle("hidden", chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 20);
 	});
 	
 	function scrollToBottom() {
 		chatBox.scrollTop = chatBox.scrollHeight;
 	}
-
+	
 	window.addEventListener("DOMContentLoaded", connectWebSocket);
 	
 	window.addEventListener("focus", () => {
-		pendingReadMessages.forEach(msgId => {
-			sendReadReceipt(msgId);
-		});
+		pendingReadMessages.forEach(msgId => sendReadReceipt(msgId));
 		pendingReadMessages.clear();
 	});
 	
-	function sendReadReceipt(msgId) {
-		if (socket.readyState !== WebSocket.OPEN) return;
+	window.addEventListener("blur", () => {
+		const beaconUrl = `/api/chat/offline?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
+		navigator.sendBeacon(beaconUrl);
+	});
 	
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") {
+			const beaconUrl = `/api/chat/offline?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
+			navigator.sendBeacon(beaconUrl);
+		}
+	});
+	
+	function sendReadReceipt(msgId) {
+		if (chatSocket.readyState !== WebSocket.OPEN) return;
 		const payload = {
 			type: "read",
 			roomId: roomId,
 			msgId: msgId,
 			userId: userId
 		};
-	
-		socket.send(JSON.stringify(payload));
+		chatSocket.send(JSON.stringify(payload));
 	}
 </script>
 </body>

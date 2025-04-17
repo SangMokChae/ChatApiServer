@@ -4,9 +4,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import kr.co.dataric.chatapi.config.sink.ChatSinkManager;
-import kr.co.dataric.chatapi.kafka.KafkaChatProducer;
+import kr.co.dataric.chatapi.kafka.producer.KafkaChatProducer;
 import kr.co.dataric.chatapi.repository.room.CustomChatRoomRepository;
 import kr.co.dataric.chatapi.service.ChatService;
+import kr.co.dataric.chatapi.service.impl.ChatRoomLastReadService;
+import kr.co.dataric.chatapi.service.impl.ChatRoomOnlineService;
+import kr.co.dataric.common.dto.ChatMessageDTO;
+import kr.co.dataric.common.dto.ChatRoomRedisDto;
 import kr.co.dataric.common.entity.ChatMessage;
 import kr.co.dataric.common.jwt.provider.JwtProvider;
 import kr.co.dataric.common.redis.service.RedisService;
@@ -31,22 +35,30 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 	private final ObjectMapper objectMapper;
 	private final ChatSinkManager chatSinkManager;
 	private final ChatService chatService;
-	private final JwtProvider jwtProvider;
 	private final KafkaChatProducer kafkaChatProducer;
-	private final RedisService redisService;
 	private final CustomChatRoomRepository customChatRoomRepository;
+	private final ChatRoomLastReadService chatRoomLastReadService;
+	private final ChatRoomOnlineService chatRoomOnlineService;
+	private final HandlerSupport handlerSupport;
 	
 	@Override
 	public Mono<Void> handle(WebSocketSession session) {
-		String roomId = extractRoomId(session);
-		String userId = extractUserIdFromCookie(session);
+		String roomId = handlerSupport.extractRoomId(session);
+		String userId = handlerSupport.extractUserIdFromCookie(session);
 		
 		if (userId == null || roomId == null) {
 			log.warn("❌ WebSocket 연결 거부 - userId 또는 roomId 누락");
 			return session.close();
 		}
 		
-		Sinks.Many<ChatMessage> sink = chatSinkManager.getOrCreateSink(roomId, userId);
+		Sinks.Many<ChatMessageDTO> sink = chatSinkManager.register(roomId, userId);
+		
+		// 안전한 초기화 처리 + fallback
+		session.getAttributes().put("lastReadMessageId", "INITIAL");
+		chatRoomLastReadService.getLastReadMessage(roomId, userId)
+			.defaultIfEmpty("INITIAL")
+			.doOnNext(lastMsgId -> session.getAttributes().put("lastReadMessageId", lastMsgId))
+			.subscribe();
 		
 		chatService.getMessagesByRoom(roomId, 0, 30)
 			.collectList()
@@ -54,6 +66,7 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 				messages.sort(Comparator.comparing(ChatMessage::getTimestamp));
 				return Flux.fromIterable(messages);
 			})
+			.map(handlerSupport::toDto)
 			.doOnNext(sink::tryEmitNext)
 			.subscribe();
 		
@@ -62,63 +75,73 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 			.flatMap(payload -> {
 				try {
 					JsonNode json = objectMapper.readTree(payload);
-					String type = json.get("type").asText();
+					String msgId = Optional.ofNullable(json.get("msgId")).map(JsonNode::asText).orElse(UUID.randomUUID().toString());
+					String message = Optional.ofNullable(json.get("message")).map(JsonNode::asText).orElse(null);
+					if (message == null || message.isBlank()) return Mono.empty();
 					
-					// 메시지 전송 처리
-					if ("chat".equals(type)) {
-						String message = Optional.ofNullable(json.get("message")).map(JsonNode::asText).orElse(null);
-						if (message == null || message.isBlank()) {
-							log.warn("❌ 필수 필드 'message' 누락 또는 빈 값. payload: {}", payload);
-							return Mono.empty();
+					LocalDateTime chatDate = LocalDateTime.now();
+					ChatMessage msg = objectMapper.treeToValue(json, ChatMessage.class);
+					msg.setMsgId(msgId);
+					msg.setSender(userId);
+					msg.setRoomId(roomId);
+					msg.setMessage(message);
+					msg.setTimestamp(chatDate);
+					
+					List<String> userIdsList = new ArrayList<>();
+					JsonNode userIdArrayNode = json.get("inUserIds");
+					if (userIdArrayNode != null && userIdArrayNode.isArray()) {
+						for (JsonNode node : userIdArrayNode) {
+							userIdsList.add(node.asText());
 						}
-						
-						String msgId = Optional.ofNullable(json.get("msgId")).map(JsonNode::asText).orElse(UUID.randomUUID().toString());
-						LocalDateTime chatDate = LocalDateTime.now();
-						
-						ChatMessage msg = objectMapper.treeToValue(json, ChatMessage.class);
-						msg.setMsgId(msgId);
-						msg.setSender(userId);
-						msg.setRoomId(roomId);
-						msg.setMessage(message);
-						msg.setTimestamp(chatDate);
-						
-						// inUserIds 파싱
-						List<String> userIdsList = new ArrayList<>();
-						JsonNode userIdArrayNode = json.get("inUserIds");
-						if (userIdArrayNode != null && userIdArrayNode.isArray()) {
-							for (JsonNode node : userIdArrayNode) {
-								userIdsList.add(node.asText());
-							}
-						}
-						
-						// 새 방이면 생성
-						if ("true".equals(Optional.ofNullable(json.get("isNewRoomMsg")).map(JsonNode::asText).orElse("false"))) {
-							customChatRoomRepository.createNewChatRoom(roomId, userIdsList).subscribe();
-						}
-						
-						// 저장 및 전파
-						chatService.saveChatMessage(msg).subscribe();
-						customChatRoomRepository.updateLastMessage(roomId, msg.getMessage(), chatDate).subscribe();
-						kafkaChatProducer.sendMessage(msg);
-						
-					} else if ("read".equals(type)) {
-						// 읽음 처리
-						String msgId = json.get("msgId").asText();
-						kafkaChatProducer.sendReadReceipt(msgId, userId, roomId);
 					}
 					
-					return Mono.empty();
+					if ("true".equals(Optional.ofNullable(json.get("isNewRoomMsg")).map(JsonNode::asText).orElse("false"))) {
+						customChatRoomRepository.createNewChatRoom(roomId, userIdsList).subscribe();
+					}
 					
+					session.getAttributes().put("lastMessageId", msgId);
+					
+					// WebSocket Sink 즉시 전송
+					ChatMessageDTO dto = handlerSupport.toDto(msg);
+					sink.tryEmitNext(dto);
+					
+					// Kafka는 후속 분산 처리용으로 전송 (메시지 전송 및 메시지 저장)
+					kafkaChatProducer.sendMessage(msg);
+					
+					// Kafka 후속 분산 처리 - (ChatRoom Last 처리)
+					ChatRoomRedisDto roomDto = new ChatRoomRedisDto();
+					roomDto.setUserIds(userIdsList);
+					roomDto.setRoomId(roomId);
+					roomDto.setLastSender(userId);
+					roomDto.setLastMessage(message);
+					roomDto.setLastMessageTime(chatDate);
+					
+					kafkaChatProducer.updateChatRoom(roomDto);
+					
+					return Mono.empty();
 				} catch (Exception e) {
 					log.error("❌ WebSocket 수신 메시지 파싱 실패 - payload: {}", payload, e);
 					return Mono.empty();
 				}
 			})
-			.doFinally(signalType -> chatSinkManager.removeSubscriber(roomId, userId))
+			// 해당 부분은 read로 변경할 것
+			.doFinally(signalType -> {
+				chatRoomOnlineService.removeUserFromOnline(roomId, userId).subscribe();
+				String lastMessageId = Optional.ofNullable(session.getAttributes().get("lastMessageId"))
+					.map(Object::toString)
+					.orElse("INITIAL");
+				chatRoomLastReadService.getLastReadMessage(roomId, userId)
+					.defaultIfEmpty("INITIAL")
+					.flatMap(existing -> !existing.equals(lastMessageId)
+						? chatRoomLastReadService.updateLastReadMessage(roomId, userId, lastMessageId)
+						: Mono.empty())
+					.subscribe();
+				chatSinkManager.unregister(roomId, userId, sink);
+			})
 			.then();
 		
 		Flux<WebSocketMessage> output = sink.asFlux()
-			.map(this::toJson)
+			.map(handlerSupport::toJson)
 			.map(session::textMessage)
 			.onErrorResume(ex -> {
 				log.warn("❌ WebSocket 출력 스트림 에러 발생: {}", ex.toString());
@@ -127,23 +150,6 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 		
 		return session.send(output).and(input);
 	}
-	
-	private String extractRoomId(WebSocketSession session) {
-		String[] parts = session.getHandshakeInfo().getUri().getPath().split("/");
-		return parts.length > 0 ? parts[parts.length - 1] : null;
-	}
-	
-	private String extractUserIdFromCookie(WebSocketSession session) {
-		return session.getHandshakeInfo().getCookies().getFirst("accessToken") != null ?
-			jwtProvider.extractUserId(session.getHandshakeInfo().getCookies().getFirst("accessToken").getValue()) : null;
-	}
-	
-	private String toJson(ChatMessage message) {
-		try {
-			return objectMapper.writeValueAsString(message);
-		} catch (JsonProcessingException e) {
-			log.error("❌ 메시지 직렬화 실패", e);
-			return "{}";
-		}
-	}
 }
+
+

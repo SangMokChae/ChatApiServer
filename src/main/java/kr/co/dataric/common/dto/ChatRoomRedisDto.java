@@ -1,5 +1,6 @@
 package kr.co.dataric.common.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import kr.co.dataric.common.entity.ChatRoom;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -17,6 +18,7 @@ public class ChatRoomRedisDto {
 	private String roomId;
 	private String roomName;
 	private String lastMessage;
+	@JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
 	private LocalDateTime lastMessageTime;
 	private List<String> userIds;
 	private String lastSender;

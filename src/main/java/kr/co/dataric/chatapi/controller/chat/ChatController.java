@@ -1,6 +1,8 @@
 package kr.co.dataric.chatapi.controller.chat;
 
+import kr.co.dataric.chatapi.dto.request.OfflineRequestDto;
 import kr.co.dataric.chatapi.service.ChatService;
+import kr.co.dataric.chatapi.service.impl.ChatRoomOnlineService;
 import kr.co.dataric.common.entity.ChatMessage;
 import kr.co.dataric.common.jwt.provider.JwtProvider;
 import kr.co.dataric.common.redis.service.RedisService;
@@ -24,8 +26,8 @@ public class ChatController {
 	
 	private final ChatService chatService;
 	private final JwtProvider jwtProvider;
-	private final RedisService redisService;
-
+	private final ChatRoomOnlineService chatRoomOnlineService;
+	
 	@GetMapping("/history")
 	public Flux<ChatMessage> getChatHistory(
 		@RequestParam String roomId,
@@ -33,5 +35,12 @@ public class ChatController {
 		@RequestParam(defaultValue = "30") int limit
 	) {
 		return chatService.getMessagesByRoom(roomId, offset, limit);
+	}
+
+	@PostMapping("/offline")
+	public Mono<ResponseEntity<Void>> setUserOffline(@RequestParam String roomId, @RequestParam String userId) {
+		log.info("유저 오프라인 처리:: roomId={}, userId={}", roomId, userId);
+		return chatRoomOnlineService.removeUserFromOnline(roomId, userId)
+			.thenReturn(ResponseEntity.ok().build());
 	}
 }

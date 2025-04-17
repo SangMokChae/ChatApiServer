@@ -1,11 +1,9 @@
 package kr.co.dataric.chatapi.service.impl;
 
-import kr.co.dataric.chatapi.kafka.KafkaChatProducer;
 import kr.co.dataric.chatapi.repository.chat.ChatMessageRepository;
 import kr.co.dataric.chatapi.service.ChatService;
 import kr.co.dataric.common.entity.ChatMessage;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
