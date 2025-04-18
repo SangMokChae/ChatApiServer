@@ -5,10 +5,13 @@ import kr.co.dataric.common.jwt.provider.JwtProvider;
 import kr.co.dataric.common.redis.service.RedisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.result.view.Rendering;
 import reactor.core.publisher.Mono;
+
+import java.time.Duration;
 
 
 @Slf4j
@@ -17,7 +20,7 @@ import reactor.core.publisher.Mono;
 public class ChatViewController {
 	
 	private final JwtProvider jwtProvider;
-	private final RedisService redisService;
+	private final ReactiveRedisTemplate<String, String> redisTemplate;
 	
 	@PostMapping("/view/chatView")
 	public Mono<Rendering> enterChatView(
@@ -29,6 +32,11 @@ public class ChatViewController {
 		if (userId == null || viewRequestDto.getRoomId() == null || viewRequestDto.getRoomId().isBlank()) {
 			return Mono.just(Rendering.redirectTo("/login").build());
 		}
+		
+		String redisKey = "online:" +viewRequestDto.getRoomId() +":" +userId;
+		Mono<Boolean> markOnline = redisTemplate.opsForValue()
+			.set(redisKey, "online", Duration.ofMinutes(30)) // TTL로 누락 방지
+			.doOnSuccess(res -> log.info("입장 시 online 처리: {}", redisKey));
 		
 		return Mono.just(Rendering.view("chat/chatView")
 			.modelAttribute("roomId", viewRequestDto.getRoomId())

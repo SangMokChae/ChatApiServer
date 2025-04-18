@@ -43,26 +43,36 @@
 	const roomId = [[${roomId}]];
 	const userId = [[${userId}]];
 	const inUserIds = [[${inUserIds}]];
-	let chatSocket;
-	let offset = 0;
-	let isLoading = false;
 	const chatBox = document.getElementById("chat-box");
 	const scrollBtn = document.getElementById("scroll-down-btn");
 	const shownMessageIds = new Set();
 	const pendingReadMessages = new Set();
-	
+	const onlineUsers = new Set();
+	let chatSocket, readSocket, statusSocket;
+	let offset = 0;
+	let isLoading = false;
+
+	// ✅ 안전하게 유저 리스트 파싱
+	const parsedUserIds = Array.isArray(inUserIds)
+		? inUserIds
+		: typeof inUserIds === 'string'
+			? inUserIds.replaceAll('[', '').replaceAll(']', '').split(',').map(s => s.trim()).filter(Boolean)
+			: [];
+
 	function connectWebSocket() {
-		// chatSocket
-		chatSocket = new WebSocket(`ws://${location.host}/ws/chat/${roomId}`);
-	
-		chatSocket.onopen = () => console.log("✅ WebSocket 연결됨");
-	
+		// ✅ 채팅 소켓
+		chatSocket = new WebSocket(`ws://${location.host}:8081/ws/chat/${roomId}`);
+		chatSocket.onopen = () => console.log("✅ Chat WebSocket 연결됨");
+		chatSocket.onclose = () => console.warn("🔁 Chat WebSocket 종료됨");
+		chatSocket.onerror = (err) => console.error("❌ Chat WebSocket 에러:", err);
+
 		chatSocket.onmessage = (event) => {
 			const msg = JSON.parse(event.data);
 			const msgId = `${msg.msgId}`;
 			if (!shownMessageIds.has(msgId)) {
 				shownMessageIds.add(msgId);
 				if (msg.sender !== userId) pendingReadMessages.add(msgId);
+
 				const timeFormat = msg.timestamp.replace("T", " ").split(".")[0].slice(0, -3);
 				const readCount = msg.readCount ?? 0;
 				const readIndicator = readCount > 0 ? ` 📖(${readCount})` : "";
@@ -71,42 +81,47 @@
 			}
 			if (shownMessageIds.size > 200) shownMessageIds.delete(shownMessageIds.values().next().value);
 		};
-	
-		chatSocket.onclose = () => console.warn("🔁 WebSocket 종료됨. 자동 재연결은 하지 않습니다.");
-		chatSocket.onerror = (err) => console.error("❌ WebSocket 에러:", err);
+
+		// ✅ 읽음 소켓
+		readSocket = new WebSocket(`ws://${location.host}:8081/ws/read/${roomId}`);
+		readSocket.onopen = () => console.log("📘 Read WebSocket 연결됨");
+		readSocket.onerror = (err) => console.error("❌ Read WebSocket 에러:", err);
+
+		// ✅ 상태 소켓
+		statusSocket = new WebSocket(`ws://${location.host}:8081/ws/status/${roomId}`);
+		statusSocket.onopen = () => console.log("📘 Status WebSocket 연결됨");
+		statusSocket.onerror = (err) => console.error("❌ Status WebSocket 에러:", err);
 		
-		// readSocket
-		const readSocket = new WebSocket(`ws://${location.host}/ws/read/${roomId}`);
+		statusSocket.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+			if (data.type === "online") {
+				onlineUsers.add(data.userId);
+				console.log(`🟢 ${data.userId} is online`);
+			} else if (data.type === "offline") {
+				onlineUsers.delete(data.userId);
+				console.log(`🔴 ${data.userId} is offline`);
+			}
+		};
 		
-		// notifySocket
-		const notifySocket = new WebSocket(`ws://${location.host}/ws/notify/${userId}`);
-		
-		// statusSocket
-		const statusSocket = new WebSocket(`ws://${location.host}/ws/status/${userId}`);
+		// ✅ 기타 WebSocket
+		const notifySocket = new WebSocket(`ws://${location.host}:8081/ws/notify/${userId}`);
 	}
-	
+
 	function sendMessage() {
 		const input = document.getElementById("message");
 		const message = input.value.trim();
 		if (!message || chatSocket.readyState !== WebSocket.OPEN) return;
-		let isNewRoomCheck = shownMessageIds.size === 0 ? 'true' : 'false';
-		let parsedUserIds = Array.isArray(inUserIds)
-			? inUserIds
-			: typeof inUserIds === 'string'
-				? inUserIds.replaceAll('[', '').replaceAll(']', '').split(',').map(s => s.trim()).filter(Boolean)
-				: [];
-		const totalReceivers = Math.max(0, parsedUserIds.length - 1);
+
 		const payload = {
 			roomId: roomId,
 			message: message,
-			isNewRoomMsg: isNewRoomCheck,
-			inUserIds: parsedUserIds,
-			totalReceivers: totalReceivers
+			isNewRoomMsg: shownMessageIds.size === 0 ? 'true' : 'false',
+			inUserIds: parsedUserIds
 		};
 		chatSocket.send(JSON.stringify(payload));
 		input.value = "";
 	}
-	
+
 	function appendMessage(msg, prepend = false) {
 		const div = document.createElement("div");
 		div.textContent = msg;
@@ -117,14 +132,15 @@
 			chatBox.scrollTop = chatBox.scrollHeight;
 		}
 	}
-	
+
 	function enterKey() {
 		if (window.event.keyCode === 13) {
 			const input = document.getElementById("message");
 			if (input.value.trim()) sendMessage();
 		}
 	}
-	
+
+	// ✅ 스크롤 업 시 이전 메시지 로딩
 	chatBox.addEventListener("scroll", () => {
 		if (!isLoading && chatBox.scrollTop <= chatBox.scrollHeight * 0.3) {
 			isLoading = true;
@@ -146,40 +162,53 @@
 		}
 		scrollBtn.classList.toggle("hidden", chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 20);
 	});
-	
+
 	function scrollToBottom() {
 		chatBox.scrollTop = chatBox.scrollHeight;
 	}
-	
-	window.addEventListener("DOMContentLoaded", connectWebSocket);
-	
+
+	// ✅ 읽음 처리
+	function sendReadReceipt(msgId) {
+		if (readSocket.readyState !== WebSocket.OPEN) return;
+
+		const payload = {
+			msgId: msgId,
+			roomId: roomId,
+			userId: userId,
+			participants: parsedUserIds
+		};
+		readSocket.send(JSON.stringify(payload));
+	}
+
+	// ✅ 읽음 전송 트리거
 	window.addEventListener("focus", () => {
 		pendingReadMessages.forEach(msgId => sendReadReceipt(msgId));
 		pendingReadMessages.clear();
 	});
+
+	window.addEventListener("DOMContentLoaded", connectWebSocket);
 	
-	window.addEventListener("blur", () => {
-		const beaconUrl = `/api/chat/offline?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
-		navigator.sendBeacon(beaconUrl);
-	});
+	// 사용자가 탭에서 벗어 날때
+	window.addEventListener("blur", statusOffline);
+	window.addEventListener("pagehide", () => statusOffline());
+	
+	window.addEventListener("focus", statusOnline);
 	
 	document.addEventListener("visibilitychange", () => {
-		if (document.visibilityState === "hidden") {
-			const beaconUrl = `/api/chat/offline?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
-			navigator.sendBeacon(beaconUrl);
-		}
+		if (document.visibilityState === "hidden") statusOffline();
+		if (document.visibilityState === "visible") statusOnline();
 	});
 	
-	function sendReadReceipt(msgId) {
-		if (chatSocket.readyState !== WebSocket.OPEN) return;
-		const payload = {
-			type: "read",
-			roomId: roomId,
-			msgId: msgId,
-			userId: userId
-		};
-		chatSocket.send(JSON.stringify(payload));
+	function statusOffline() {
+		const beaconUrl = `/api/chat/offline?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
+		navigator.sendBeacon(beaconUrl); // POST 전송
 	}
+	
+	function statusOnline() {
+		const url = `/api/chat/online?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
+		fetch(url, { method: 'POST' }); // POST 전송
+	}
+	
 </script>
 </body>
 </html>

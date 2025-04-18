@@ -37,10 +37,4 @@ public class ChatController {
 		return chatService.getMessagesByRoom(roomId, offset, limit);
 	}
 
-	@PostMapping("/offline")
-	public Mono<ResponseEntity<Void>> setUserOffline(@RequestParam String roomId, @RequestParam String userId) {
-		log.info("유저 오프라인 처리:: roomId={}, userId={}", roomId, userId);
-		return chatRoomOnlineService.removeUserFromOnline(roomId, userId)
-			.thenReturn(ResponseEntity.ok().build());
-	}
 }

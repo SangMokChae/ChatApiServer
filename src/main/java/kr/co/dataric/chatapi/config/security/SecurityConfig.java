@@ -43,7 +43,10 @@ public class SecurityConfig {
 					"/", "/favicon.ico",
 					"/css/**", "/js/**", "/img/**",
 					"/login", "/logout", "/loginProc",
-					"/ws/chat/**"
+					"/ws/chat/**",
+					"/ws/read/**",
+					"/ws/notify/**",
+					"/ws/status/**"
 				).permitAll()
 				.anyExchange().authenticated()
 			)

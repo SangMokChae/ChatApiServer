@@ -2,12 +2,6 @@ package kr.co.dataric.chatapi.handler;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import kr.co.dataric.chatapi.config.sink.ChatSinkManager;
-import kr.co.dataric.chatapi.kafka.producer.KafkaChatProducer;
-import kr.co.dataric.chatapi.repository.room.CustomChatRoomRepository;
-import kr.co.dataric.chatapi.service.ChatService;
-import kr.co.dataric.chatapi.service.impl.ChatRoomLastReadService;
-import kr.co.dataric.chatapi.service.impl.ChatRoomOnlineService;
 import kr.co.dataric.common.dto.ChatMessageDTO;
 import kr.co.dataric.common.dto.ReadReceiptEvent;
 import kr.co.dataric.common.entity.ChatMessage;
