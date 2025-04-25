@@ -14,11 +14,15 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ReadReceiptEvent {
+	
 	private String msgId;
 	private String userId;
 	private String roomId;
-	@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
-	@Builder.Default
-	private LocalDateTime timestamp = LocalDateTime.now();
-	private List<String> participants; // 🔥 추가
+	
+	private LocalDateTime timestamp;
+	
+	private String lastRead;
+	private String status;
+	
+	private List<String> participants; // 🔥 읽음 처리 대상자 목록
 }

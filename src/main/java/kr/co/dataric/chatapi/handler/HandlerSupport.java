@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 @Slf4j
 @Component
@@ -31,7 +32,7 @@ public class HandlerSupport {
 			jwtProvider.extractUserId(session.getHandshakeInfo().getCookies().getFirst("accessToken").getValue()) : null;
 	}
 	
-	public String toJson(ChatMessageDTO message) {
+	public String toJson(Object message) {
 		try {
 			return objectMapper.writeValueAsString(message);
 		} catch (JsonProcessingException e) {
@@ -56,7 +57,7 @@ public class HandlerSupport {
 			.roomId(roomId)
 			.userId(userId)
 			.msgId(payload) // 또는 payload를 JSON 파싱 후 msgId 추출
-			.timestamp(LocalDateTime.now())
+			.timestamp(LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS))
 			.build();
 		
 //		kafkaTemplate.send("chat.read.receipt", event);

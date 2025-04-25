@@ -10,6 +10,7 @@ import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 @Table("friends")
 @Data
@@ -35,6 +36,6 @@ public class Friends {
 	
 	@Builder.Default
 	@Column("created_at")
-	private LocalDateTime createdAt = LocalDateTime.now();
+	private LocalDateTime createdAt = LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS);
 	
 }

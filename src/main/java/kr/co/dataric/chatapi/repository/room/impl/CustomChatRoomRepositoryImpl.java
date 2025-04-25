@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Slf4j
@@ -23,7 +24,7 @@ public class CustomChatRoomRepositoryImpl implements CustomChatRoomRepository {
 		ChatRoom room = ChatRoom.builder()
 			.roomId(roomId)
 			.participants(userIdsList)
-			.createAt(LocalDateTime.now())
+			.createAt(LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS))
 			.roomType("1")
 			.roomTypeKey("null")
 			.roomName("")

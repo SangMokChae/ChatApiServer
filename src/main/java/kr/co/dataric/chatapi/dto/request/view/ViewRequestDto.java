@@ -10,6 +10,6 @@ import lombok.NoArgsConstructor;
 public class ViewRequestDto {
 	
 	private String roomId;
-	private String inUserIds;
+	private String participants;
 	
 }

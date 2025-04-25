@@ -44,9 +44,8 @@ public class SecurityConfig {
 					"/css/**", "/js/**", "/img/**",
 					"/login", "/logout", "/loginProc",
 					"/ws/chat/**",
-					"/ws/read/**",
-					"/ws/notify/**",
-					"/ws/status/**"
+					"/ws/rs/**",
+					"/ws/notify/**"
 				).permitAll()
 				.anyExchange().authenticated()
 			)

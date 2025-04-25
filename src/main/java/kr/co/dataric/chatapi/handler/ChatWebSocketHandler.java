@@ -25,6 +25,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Slf4j
@@ -53,19 +54,9 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 		
 		Sinks.Many<ChatMessageDTO> sink = chatSinkManager.register(roomId, userId);
 		
-		// 안전한 초기화 처리 + fallback
-		session.getAttributes().put("lastReadMessageId", "INITIAL");
-		chatRoomLastReadService.getLastReadMessage(roomId, userId)
-			.defaultIfEmpty("INITIAL")
-			.doOnNext(lastMsgId -> session.getAttributes().put("lastReadMessageId", lastMsgId))
-			.subscribe();
-		
+		// ✅ 이전 메시지 초기 전송
 		chatService.getMessagesByRoom(roomId, 0, 30)
-			.collectList()
-			.flatMapMany(messages -> {
-				messages.sort(Comparator.comparing(ChatMessage::getTimestamp));
-				return Flux.fromIterable(messages);
-			})
+			.sort(Comparator.comparing(ChatMessage::getTimestamp))
 			.map(handlerSupport::toDto)
 			.doOnNext(sink::tryEmitNext)
 			.subscribe();
@@ -79,44 +70,42 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 					String message = Optional.ofNullable(json.get("message")).map(JsonNode::asText).orElse(null);
 					if (message == null || message.isBlank()) return Mono.empty();
 					
-					LocalDateTime chatDate = LocalDateTime.now();
 					ChatMessage msg = objectMapper.treeToValue(json, ChatMessage.class);
 					msg.setMsgId(msgId);
 					msg.setSender(userId);
 					msg.setRoomId(roomId);
 					msg.setMessage(message);
-					msg.setTimestamp(chatDate);
+					msg.setTimestamp(LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS));
 					
+					// ✅ 참여자 추출
 					List<String> userIdsList = new ArrayList<>();
-					JsonNode userIdArrayNode = json.get("inUserIds");
-					if (userIdArrayNode != null && userIdArrayNode.isArray()) {
-						for (JsonNode node : userIdArrayNode) {
-							userIdsList.add(node.asText());
-						}
+					JsonNode inUserNode = json.get("participants");
+					if (inUserNode != null && inUserNode.isArray()) {
+						inUserNode.forEach(u -> userIdsList.add(u.asText()));
 					}
 					
 					if ("true".equals(Optional.ofNullable(json.get("isNewRoomMsg")).map(JsonNode::asText).orElse("false"))) {
 						customChatRoomRepository.createNewChatRoom(roomId, userIdsList).subscribe();
 					}
 					
-					session.getAttributes().put("lastMessageId", msgId);
+					log.info("userIdsList :: {}", userIdsList);
 					
 					// WebSocket Sink 즉시 전송
 					ChatMessageDTO dto = handlerSupport.toDto(msg);
 					sink.tryEmitNext(dto);
 					
 					// Kafka는 후속 분산 처리용으로 전송 (메시지 전송 및 메시지 저장)
-					kafkaChatProducer.sendMessage(msg);
+					kafkaChatProducer.sendMessage(msg, userIdsList);
 					
 					// Kafka 후속 분산 처리 - (ChatRoom Last 처리)
-					ChatRoomRedisDto roomDto = new ChatRoomRedisDto();
-					roomDto.setUserIds(userIdsList);
-					roomDto.setRoomId(roomId);
-					roomDto.setLastSender(userId);
-					roomDto.setLastMessage(message);
-					roomDto.setLastMessageTime(chatDate);
-					
-					kafkaChatProducer.updateChatRoom(roomDto);
+					// ✅ Redis용 ChatRoomDto Kafka 전송
+					kafkaChatProducer.updateChatRoom(ChatRoomRedisDto.builder()
+						.roomId(roomId)
+						.lastMessage(message)
+						.lastSender(userId)
+						.lastMessageTime(msg.getTimestamp())
+						.participants(userIdsList)
+						.build());
 					
 					return Mono.empty();
 				} catch (Exception e) {
@@ -124,19 +113,10 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 					return Mono.empty();
 				}
 			})
-			// 해당 부분은 read로 변경할 것
 			.doFinally(signalType -> {
 				chatRoomOnlineService.removeUserFromOnline(roomId, userId).subscribe();
-				String lastMessageId = Optional.ofNullable(session.getAttributes().get("lastMessageId"))
-					.map(Object::toString)
-					.orElse("INITIAL");
-				chatRoomLastReadService.getLastReadMessage(roomId, userId)
-					.defaultIfEmpty("INITIAL")
-					.flatMap(existing -> !existing.equals(lastMessageId)
-						? chatRoomLastReadService.updateLastReadMessage(roomId, userId, lastMessageId)
-						: Mono.empty())
-					.subscribe();
 				chatSinkManager.unregister(roomId, userId, sink);
+				log.info("📴 Chat WebSocket 종료 - roomId: {}, userId: {}", roomId, userId);
 			})
 			.then();
 		

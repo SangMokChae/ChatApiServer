@@ -1,4 +1,4 @@
-package kr.co.dataric.chatapi.dto.request;
+package kr.co.dataric.chatapi.dto.request.onoff;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

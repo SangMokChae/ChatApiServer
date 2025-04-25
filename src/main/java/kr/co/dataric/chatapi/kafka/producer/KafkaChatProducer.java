@@ -11,6 +11,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -23,13 +24,14 @@ public class KafkaChatProducer {
 	private static final String REDIS_UPDATE_TOPIC = "chat.room.redis.update";
 	
 	// 채팅 전송
-	public void sendMessage(ChatMessage msg) {
+	public void sendMessage(ChatMessage msg, List<String> userIdsList) {
 		ChatMessageDTO dto = ChatMessageDTO.builder()
 			.id(msg.getMsgId())
 			.roomId(msg.getRoomId())
 			.sender(msg.getSender())
 			.message(msg.getMessage())
 			.timestamp(msg.getTimestamp())
+			.participants(userIdsList)
 			.build();
 
 		// Sink에 즉시 전송
